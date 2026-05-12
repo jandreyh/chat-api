@@ -12,7 +12,7 @@ Sin frameworks externos — solo `net/http`, `goroutines`, `channels` y `gorilla
 go mod tidy
 
 # 2. Ejecutar
-go run cmd/main.go
+go run ./cmd/chat-api
 
 # 3. Abrir en el navegador
 open http://localhost:8080
@@ -20,25 +20,72 @@ open http://localhost:8080
 
 Abre **varias pestañas** del navegador para simular múltiples usuarios chateando.
 
+### Compilar binario
+
+```bash
+go build -o bin/chat-api ./cmd/chat-api
+./bin/chat-api
+```
+
+### Exponer públicamente con Cloudflare Tunnel
+
+```bash
+cloudflared tunnel --url http://localhost:8080
+```
+
+---
+
+## ⚙️ Configuración (variables de entorno)
+
+Todos los parámetros tienen un valor por defecto razonable. Sobreescríbelos vía env vars:
+
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `PORT` | `8080` | Puerto HTTP |
+| `STATIC_DIR` | `static` | Directorio del frontend |
+| `ALLOWED_ORIGINS` | `*` | Orígenes permitidos para el WebSocket (CSV o `*`) |
+| `WS_READ_LIMIT_BYTES` | `512` | Tamaño máximo de mensaje entrante |
+| `WS_READ_TIMEOUT` | `60s` | Timeout de lectura (sin pong = desconexión) |
+| `WS_WRITE_TIMEOUT` | `10s` | Timeout de escritura |
+| `WS_PING_INTERVAL` | `54s` | Intervalo entre pings (keepalive) |
+| `WS_SEND_BUFFER` | `256` | Buffer del canal Send por cliente |
+| `HUB_BROADCAST_BUFFER` | `256` | Buffer del canal Broadcast del hub |
+| `SHUTDOWN_TIMEOUT` | `5s` | Tiempo para drenar conexiones al cerrar |
+
+Ejemplo en producción:
+
+```bash
+PORT=3000 \
+ALLOWED_ORIGINS="https://midominio.com,https://www.midominio.com" \
+./bin/chat-api
+```
+
 ---
 
 ## 🗂️ Estructura del proyecto
 
 ```
-chat-app/
-├── cmd/
-│   └── main.go                    ← Servidor, rutas, punto de entrada
+chat-api/
+├── cmd/chat-api/
+│   └── main.go                    ← Punto de entrada (config + señales)
 ├── internal/
+│   ├── config/
+│   │   └── config.go              ← Carga env vars con defaults
+│   ├── server/
+│   │   └── server.go              ← http.Server + shutdown graceful
 │   ├── hub/
-│   │   ├── hub.go                 ← Hub central (goroutine + channels)
-│   │   ├── client.go              ← Cliente WebSocket (ReadPump + WritePump)
-│   │   └── helpers.go             ← Métodos auxiliares del Hub
-│   ├── handlers/
-│   │   └── ws.go                  ← Upgrade HTTP→WebSocket
+│   │   ├── hub.go                 ← Loop principal + Run() + interfaz Client
+│   │   ├── commands.go            ← Register / Unregister / Publish
+│   │   └── queries.go             ← IsUsernameTaken / ActiveRooms (RLock)
+│   ├── ws/
+│   │   ├── client.go              ← Implementación WS de hub.Client (Read/Write loops)
+│   │   └── handler.go             ← Upgrade HTTP→WebSocket + endpoint /api/rooms
 │   └── models/
-│       └── models.go              ← Structs: Message, MessageType
+│       └── message.go             ← Struct Message + MessageType
 └── static/
-    └── index.html                 ← Frontend completo (HTML + CSS + JS)
+    ├── index.html                 ← Markup
+    ├── css/styles.css             ← Estilos
+    └── js/app.js                  ← Lógica del cliente
 ```
 
 ---
@@ -65,29 +112,52 @@ Cliente conectado
 ```
 
 ### Channels
+Encapsulados dentro del hub y expuestos vía métodos (API limpia):
 ```go
-Hub.Register   chan *Client        // cliente nuevo
-Hub.Unregister chan *Client        // cliente se va
-Hub.Broadcast  chan models.Message // mensaje para todos
-Client.Send    chan models.Message // mensajes para este cliente
+hub.registerCh   chan Client          // cliente nuevo
+hub.unregisterCh chan Client          // cliente se va
+hub.broadcastCh  chan models.Message  // mensaje para distribuir
+client.sendCh    chan models.Message  // mensajes para este cliente
+
+// API pública en commands.go:
+hub.Register(c)     // → registerCh <- c
+hub.Unregister(c)   // → unregisterCh <- c
+hub.Publish(msg)    // → broadcastCh <- msg
 ```
 
 ### Select
-El Hub usa `select` para procesar múltiples canales:
+El Hub multiplexa eventos con `select`:
 ```go
 select {
-case client := <-h.Register:   // nuevo cliente
-case client := <-h.Unregister: // cliente se va
-case msg    := <-h.Broadcast:  // distribuir mensaje
+case c   := <-h.registerCh:   // nuevo cliente
+case c   := <-h.unregisterCh: // cliente se va
+case msg := <-h.broadcastCh:  // distribuir mensaje
 }
 ```
 
 ### Maps
 ```go
-Rooms map[string]map[*Client]bool
-// "General" → {cliente1: true, cliente2: true}
-// "Go"      → {cliente3: true}
+rooms map[string]map[Client]struct{}
+// "General" → {cliente1: {}, cliente2: {}}
+// "Go"      → {cliente3: {}}
 ```
+
+### Interfaces (Dependency Inversion)
+El hub no conoce WebSocket — depende de la interfaz `Client`:
+```go
+type Client interface {
+    Username() string
+    Room() string
+    Deliver(msg models.Message) bool
+    Close()
+}
+```
+Cualquier transporte futuro (gRPC, SSE) puede plugearse sin tocar el hub.
+
+### Concurrencia: channels + sync.RWMutex
+- Las **mutaciones** se serializan vía channels en `Run()` (patrón actor).
+- Las **consultas externas** (`IsUsernameTaken`, `ActiveRooms`) usan `RLock`/`RUnlock` para evitar data races.
+- `Client.Close()` usa `sync.Once` para que el cierre del canal sea idempotente.
 
 ---
 
