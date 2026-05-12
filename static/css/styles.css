@@ -9,7 +9,22 @@
   --pink: #F472B6;
   --text: #E2E8F0;
   --muted: #64748B;
+  --bubble-own-text: #0F172A;
   --radius: 12px;
+}
+
+:root[data-theme="light"] {
+  --bg: #F8FAFC;
+  --surface: #FFFFFF;
+  --surface2: #F1F5F9;
+  --border: rgba(15,23,42,0.10);
+  --blue: #2563EB;
+  --teal: #059669;
+  --amber: #D97706;
+  --pink: #DB2777;
+  --text: #0F172A;
+  --muted: #64748B;
+  --bubble-own-text: #FFFFFF;
 }
 * { margin:0; padding:0; box-sizing:border-box }
 body {
@@ -37,6 +52,7 @@ body {
   width: 100%;
   max-width: 400px;
   text-align: center;
+  position: relative;
 }
 .login-logo {
   font-size: 48px;
@@ -71,7 +87,7 @@ body {
   background: var(--blue);
   border: none;
   border-radius: 10px;
-  color: #0F172A;
+  color: var(--bubble-own-text);
   font-size: 15px;
   font-weight: 700;
   cursor: pointer;
@@ -229,7 +245,7 @@ body {
 }
 .msg.own .msg-bubble {
   background: var(--blue);
-  color: #0F172A;
+  color: var(--bubble-own-text);
   border-bottom-right-radius: 4px;
 }
 .msg.other .msg-bubble {
@@ -306,7 +322,7 @@ body {
 }
 #send-btn:hover { opacity: 0.9 }
 #send-btn:active { transform: scale(0.95) }
-#send-btn svg { width: 18px; height: 18px; fill: #0F172A }
+#send-btn svg { width: 18px; height: 18px; fill: var(--bubble-own-text) }
 
 /* Sidebar */
 .sidebar {
@@ -371,4 +387,32 @@ body {
   border-radius: 4px;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+/* ── THEME TOGGLE ── */
+.btn-theme {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--muted);
+  transition: color 0.2s, background 0.2s;
+  flex-shrink: 0;
+}
+.btn-theme:hover { color: var(--text) }
+.btn-theme svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+.btn-theme .icon-moon { display: none }
+.btn-theme .icon-sun  { display: block }
+:root[data-theme="light"] .btn-theme .icon-sun  { display: none }
+:root[data-theme="light"] .btn-theme .icon-moon { display: block }
+
+.btn-theme-floating {
+  position: absolute;
+  top: 14px;
+  right: 14px;
 }

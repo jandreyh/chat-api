@@ -4,6 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GoChat — Chat en Tiempo Real</title>
+<script>
+  // Anti-flash: aplica el tema guardado o la preferencia del sistema antes del primer render
+  (function () {
+    try {
+      var saved = localStorage.getItem('theme');
+      var prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+      if (saved === 'light' || (saved !== 'dark' && prefersLight)) {
+        document.documentElement.dataset.theme = 'light';
+      }
+    } catch (error) { /* localStorage no disponible */ }
+  })();
+</script>
 <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
@@ -11,6 +23,10 @@
 <!-- ── LOGIN ── -->
 <div id="login-screen">
   <div class="login-card">
+    <button class="btn-theme btn-theme-floating" onclick="toggleTheme()" aria-label="Cambiar tema">
+      <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path></svg>
+      <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+    </button>
     <div class="tech-tag">
       <span style="width:6px;height:6px;border-radius:50%;background:#60A5FA"></span>
       WebSocket · Go · Goroutines
@@ -37,6 +53,10 @@
         <span id="ws-status-text">Conectado</span>
       </div>
     </div>
+    <button class="btn-theme" onclick="toggleTheme()" aria-label="Cambiar tema">
+      <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path></svg>
+      <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+    </button>
     <button class="btn-leave" onclick="disconnect()">Salir</button>
   </div>
 

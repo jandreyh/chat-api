@@ -145,6 +145,18 @@ function updateUserList(users) {
   `).join('');
 }
 
+// ── TEMA CLARO / OSCURO ──────────────────────────────────────────────
+function toggleTheme() {
+  const current = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  if (next === 'light') {
+    document.documentElement.dataset.theme = 'light';
+  } else {
+    delete document.documentElement.dataset.theme;
+  }
+  try { localStorage.setItem('theme', next); } catch (error) { /* sin localStorage */ }
+}
+
 // ── HELPERS ──────────────────────────────────────────────────────────
 function setStatus(connected) {
   const dot = document.getElementById('ws-dot');
