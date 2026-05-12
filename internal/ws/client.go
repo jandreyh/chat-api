@@ -40,28 +40,28 @@ type ClientOptions struct {
 }
 
 // NewClient construye un Client listo para registrar en el hub.
-func NewClient(opts ClientOptions) *Client {
+func NewClient(options ClientOptions) *Client {
 	return &Client{
-		hub:          opts.Hub,
-		conn:         opts.Conn,
-		sendCh:       make(chan models.Message, opts.SendBuffer),
-		username:     opts.Username,
-		room:         opts.Room,
-		readLimit:    opts.ReadLimit,
-		readTimeout:  opts.ReadTimeout,
-		writeTimeout: opts.WriteTimeout,
-		pingInterval: opts.PingInterval,
+		hub:          options.Hub,
+		conn:         options.Conn,
+		sendCh:       make(chan models.Message, options.SendBuffer),
+		username:     options.Username,
+		room:         options.Room,
+		readLimit:    options.ReadLimit,
+		readTimeout:  options.ReadTimeout,
+		writeTimeout: options.WriteTimeout,
+		pingInterval: options.PingInterval,
 	}
 }
 
-func (c *Client) Username() string { return c.username }
-func (c *Client) Room() string     { return c.room }
+func (client *Client) Username() string { return client.username }
+func (client *Client) Room() string     { return client.room }
 
 // Deliver intenta encolar un mensaje. Devuelve false si el buffer está lleno
 // (cliente lento) para que el hub pueda desconectarlo.
-func (c *Client) Deliver(msg models.Message) bool {
+func (client *Client) Deliver(msg models.Message) bool {
 	select {
-	case c.sendCh <- msg:
+	case client.sendCh <- msg:
 		return true
 	default:
 		return false
@@ -69,30 +69,30 @@ func (c *Client) Deliver(msg models.Message) bool {
 }
 
 // Close cierra el canal de envío de forma idempotente.
-func (c *Client) Close() {
-	c.closeOnce.Do(func() { close(c.sendCh) })
+func (client *Client) Close() {
+	client.closeOnce.Do(func() { close(client.sendCh) })
 }
 
 // Start lanza las dos goroutines de lectura y escritura.
-func (c *Client) Start() {
-	go c.writeLoop()
-	go c.readLoop()
+func (client *Client) Start() {
+	go client.writeLoop()
+	go client.readLoop()
 }
 
-func (c *Client) readLoop() {
+func (client *Client) readLoop() {
 	defer func() {
-		c.hub.Unregister(c)
-		c.conn.Close()
+		client.hub.Unregister(client)
+		client.conn.Close()
 	}()
 
-	c.conn.SetReadLimit(c.readLimit)
-	_ = c.conn.SetReadDeadline(time.Now().Add(c.readTimeout))
-	c.conn.SetPongHandler(func(string) error {
-		return c.conn.SetReadDeadline(time.Now().Add(c.readTimeout))
+	client.conn.SetReadLimit(client.readLimit)
+	_ = client.conn.SetReadDeadline(time.Now().Add(client.readTimeout))
+	client.conn.SetPongHandler(func(string) error {
+		return client.conn.SetReadDeadline(time.Now().Add(client.readTimeout))
 	})
 
 	for {
-		_, raw, err := c.conn.ReadMessage()
+		_, raw, err := client.conn.ReadMessage()
 		if err != nil {
 			return
 		}
@@ -104,37 +104,37 @@ func (c *Client) readLoop() {
 		}
 
 		// Sobrescribimos campos controlados por el servidor para evitar spoofing.
-		msg.Username = c.username
-		msg.Room = c.room
+		msg.Username = client.username
+		msg.Room = client.room
 		msg.Timestamp = time.Now()
 		msg.Type = models.TypeChat
 
-		c.hub.Publish(msg)
+		client.hub.Publish(msg)
 	}
 }
 
-func (c *Client) writeLoop() {
-	ticker := time.NewTicker(c.pingInterval)
+func (client *Client) writeLoop() {
+	ticker := time.NewTicker(client.pingInterval)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		client.conn.Close()
 	}()
 
 	for {
 		select {
-		case msg, ok := <-c.sendCh:
-			_ = c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
+		case msg, ok := <-client.sendCh:
+			_ = client.conn.SetWriteDeadline(time.Now().Add(client.writeTimeout))
 			if !ok {
-				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				_ = client.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-			if err := c.conn.WriteJSON(msg); err != nil {
+			if err := client.conn.WriteJSON(msg); err != nil {
 				return
 			}
 
 		case <-ticker.C:
-			_ = c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			_ = client.conn.SetWriteDeadline(time.Now().Add(client.writeTimeout))
+			if err := client.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
 		}

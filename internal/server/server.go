@@ -15,15 +15,15 @@ import (
 
 // Server compone la aplicación: hub + handlers + http.Server.
 type Server struct {
-	cfg  *config.Config
-	hub  *hub.Hub
-	http *http.Server
+	cfg        *config.Config
+	hub        *hub.Hub
+	httpServer *http.Server
 }
 
 // New ensambla todas las dependencias y devuelve un Server listo para Run.
 func New(cfg *config.Config) *Server {
-	h := hub.New(cfg.BroadcastBufferSize)
-	handler := ws.NewHandler(h, cfg)
+	chatHub := hub.New(cfg.BroadcastBufferSize)
+	handler := ws.NewHandler(chatHub, cfg)
 
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir(cfg.StaticDir)))
@@ -33,8 +33,8 @@ func New(cfg *config.Config) *Server {
 
 	return &Server{
 		cfg: cfg,
-		hub: h,
-		http: &http.Server{
+		hub: chatHub,
+		httpServer: &http.Server{
 			Addr:              ":" + cfg.Port,
 			Handler:           mux,
 			ReadHeaderTimeout: 10 * time.Second,
@@ -43,13 +43,13 @@ func New(cfg *config.Config) *Server {
 }
 
 // Run arranca el hub y el servidor HTTP. Cancela limpiamente cuando ctx termina.
-func (s *Server) Run(ctx context.Context) error {
-	go s.hub.Run()
+func (server *Server) Run(ctx context.Context) error {
+	go server.hub.Run()
 
 	serveErr := make(chan error, 1)
 	go func() {
-		log.Printf("chat-api escuchando en :%s", s.cfg.Port)
-		if err := s.http.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("chat-api escuchando en :%s", server.cfg.Port)
+		if err := server.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serveErr <- err
 		}
 		close(serveErr)
@@ -57,18 +57,18 @@ func (s *Server) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		log.Printf("chat-api: cierre solicitado, drenando conexiones (%s)", s.cfg.ShutdownTimeout)
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.cfg.ShutdownTimeout)
+		log.Printf("chat-api: cierre solicitado, drenando conexiones (%s)", server.cfg.ShutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), server.cfg.ShutdownTimeout)
 		defer cancel()
-		return s.http.Shutdown(shutdownCtx)
+		return server.httpServer.Shutdown(shutdownCtx)
 	case err := <-serveErr:
 		return err
 	}
 }
 
-func health(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{
+func health(writer http.ResponseWriter, _ *http.Request) {
+	writer.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(writer).Encode(map[string]string{
 		"status": "ok",
 		"app":    "chat-api",
 	})

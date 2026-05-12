@@ -135,11 +135,11 @@ function addSystemMessage(text) {
 // ── LISTA DE USUARIOS ────────────────────────────────────────────────
 function updateUserList(users) {
   const list = document.getElementById('users-list');
-  list.innerHTML = users.map(u => `
+  list.innerHTML = users.map(user => `
     <div class="user-item">
       <div class="user-dot"></div>
-      <span style="color:${getColor(u)};font-weight:${u===myUsername?'700':'400'}">
-        ${escapeHTML(u)} ${u === myUsername ? '(tú)' : ''}
+      <span style="color:${getColor(user)};font-weight:${user===myUsername?'700':'400'}">
+        ${escapeHTML(user)} ${user === myUsername ? '(tú)' : ''}
       </span>
     </div>
   `).join('');
@@ -168,10 +168,10 @@ function escapeHTML(str) {
 
 // Enter en el login
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('input-room').addEventListener('keydown', e => {
-    if (e.key === 'Enter') connect();
+  document.getElementById('input-room').addEventListener('keydown', event => {
+    if (event.key === 'Enter') connect();
   });
-  document.getElementById('input-username').addEventListener('keydown', e => {
-    if (e.key === 'Enter') document.getElementById('input-room').focus();
+  document.getElementById('input-username').addEventListener('keydown', event => {
+    if (event.key === 'Enter') document.getElementById('input-room').focus();
   });
 });

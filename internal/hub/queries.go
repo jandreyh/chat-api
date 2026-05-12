@@ -8,16 +8,16 @@ type RoomInfo struct {
 
 // IsUsernameTaken indica si un username ya está en uso dentro de una sala.
 // Safe para llamar desde cualquier goroutine.
-func (h *Hub) IsUsernameTaken(room, username string) bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+func (hub *Hub) IsUsernameTaken(room, username string) bool {
+	hub.mu.RLock()
+	defer hub.mu.RUnlock()
 
-	members, ok := h.rooms[room]
-	if !ok {
+	members, exists := hub.rooms[room]
+	if !exists {
 		return false
 	}
-	for c := range members {
-		if c.Username() == username {
+	for client := range members {
+		if client.Username() == username {
 			return true
 		}
 	}
@@ -26,12 +26,12 @@ func (h *Hub) IsUsernameTaken(room, username string) bool {
 
 // ActiveRooms retorna un snapshot de las salas activas con su conteo.
 // Safe para llamar desde cualquier goroutine.
-func (h *Hub) ActiveRooms() []RoomInfo {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+func (hub *Hub) ActiveRooms() []RoomInfo {
+	hub.mu.RLock()
+	defer hub.mu.RUnlock()
 
-	rooms := make([]RoomInfo, 0, len(h.rooms))
-	for name, members := range h.rooms {
+	rooms := make([]RoomInfo, 0, len(hub.rooms))
+	for name, members := range hub.rooms {
 		rooms = append(rooms, RoomInfo{Name: name, Users: len(members)})
 	}
 	return rooms

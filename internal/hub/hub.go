@@ -39,72 +39,72 @@ func New(broadcastBuffer int) *Hub {
 }
 
 // Run ejecuta el loop principal del hub. Debe correr en su propia goroutine.
-func (h *Hub) Run() {
+func (hub *Hub) Run() {
 	for {
 		select {
-		case c := <-h.registerCh:
-			h.onRegister(c)
-		case c := <-h.unregisterCh:
-			h.onUnregister(c)
-		case msg := <-h.broadcastCh:
-			h.fanout(msg.Room, msg)
+		case client := <-hub.registerCh:
+			hub.onRegister(client)
+		case client := <-hub.unregisterCh:
+			hub.onUnregister(client)
+		case msg := <-hub.broadcastCh:
+			hub.fanout(msg.Room, msg)
 		}
 	}
 }
 
-func (h *Hub) onRegister(c Client) {
-	room := c.Room()
+func (hub *Hub) onRegister(client Client) {
+	room := client.Room()
 
-	h.mu.Lock()
-	if _, ok := h.rooms[room]; !ok {
-		h.rooms[room] = make(map[Client]struct{})
+	hub.mu.Lock()
+	if _, exists := hub.rooms[room]; !exists {
+		hub.rooms[room] = make(map[Client]struct{})
 	}
-	h.rooms[room][c] = struct{}{}
-	occupants := len(h.rooms[room])
-	users := h.usernamesLocked(room)
-	h.mu.Unlock()
+	hub.rooms[room][client] = struct{}{}
+	occupants := len(hub.rooms[room])
+	users := hub.usernamesLocked(room)
+	hub.mu.Unlock()
 
-	log.Printf("[%s] %s se conectó (%d en sala)", room, c.Username(), occupants)
-	h.fanout(room, models.Message{
+	log.Printf("[%s] %s se conectó (%d en sala)", room, client.Username(), occupants)
+	hub.fanout(room, models.Message{
 		Type:     models.TypeJoin,
-		Username: c.Username(),
-		Content:  c.Username() + " se unió al chat 👋",
+		Username: client.Username(),
+		Content:  client.Username() + " se unió al chat 👋",
 		Room:     room,
 		Users:    users,
 	})
 }
 
-func (h *Hub) onUnregister(c Client) {
-	room := c.Room()
+func (hub *Hub) onUnregister(client Client) {
+	room := client.Room()
 
-	h.mu.Lock()
-	clients, ok := h.rooms[room]
-	if !ok {
-		h.mu.Unlock()
+	hub.mu.Lock()
+	members, roomExists := hub.rooms[room]
+	if !roomExists {
+		hub.mu.Unlock()
 		return
 	}
-	if _, ok := clients[c]; !ok {
-		h.mu.Unlock()
+	if _, isMember := members[client]; !isMember {
+		hub.mu.Unlock()
 		return
 	}
-	delete(clients, c)
-	remaining := len(clients)
+	delete(members, client)
+	remaining := len(members)
 	var users []string
 	if remaining == 0 {
-		delete(h.rooms, room)
+		delete(hub.rooms, room)
 	} else {
-		users = h.usernamesLocked(room)
+		users = hub.usernamesLocked(room)
 	}
-	h.mu.Unlock()
+	hub.mu.Unlock()
 
-	c.Close()
-	log.Printf("[%s] %s se desconectó (%d en sala)", room, c.Username(), remaining)
+	client.Close()
+	log.Printf("[%s] %s se desconectó (%d en sala)", room, client.Username(), remaining)
 
 	if remaining > 0 {
-		h.fanout(room, models.Message{
+		hub.fanout(room, models.Message{
 			Type:     models.TypeLeave,
-			Username: c.Username(),
-			Content:  c.Username() + " salió del chat",
+			Username: client.Username(),
+			Content:  client.Username() + " salió del chat",
 			Room:     room,
 			Users:    users,
 		})
@@ -114,50 +114,50 @@ func (h *Hub) onUnregister(c Client) {
 // fanout entrega un mensaje a todos los clientes de una sala.
 // Toma un snapshot bajo lock corto, entrega fuera del lock para evitar
 // que un cliente lento bloquee a los demás.
-func (h *Hub) fanout(room string, msg models.Message) {
-	h.mu.RLock()
-	members, ok := h.rooms[room]
-	if !ok {
-		h.mu.RUnlock()
+func (hub *Hub) fanout(room string, msg models.Message) {
+	hub.mu.RLock()
+	members, exists := hub.rooms[room]
+	if !exists {
+		hub.mu.RUnlock()
 		return
 	}
 	snapshot := make([]Client, 0, len(members))
-	for c := range members {
-		snapshot = append(snapshot, c)
+	for client := range members {
+		snapshot = append(snapshot, client)
 	}
-	h.mu.RUnlock()
+	hub.mu.RUnlock()
 
 	var stale []Client
-	for _, c := range snapshot {
-		if !c.Deliver(msg) {
-			stale = append(stale, c)
+	for _, client := range snapshot {
+		if !client.Deliver(msg) {
+			stale = append(stale, client)
 		}
 	}
 	if len(stale) == 0 {
 		return
 	}
 
-	h.mu.Lock()
-	if members, ok := h.rooms[room]; ok {
-		for _, c := range stale {
-			delete(members, c)
+	hub.mu.Lock()
+	if members, exists := hub.rooms[room]; exists {
+		for _, client := range stale {
+			delete(members, client)
 		}
 		if len(members) == 0 {
-			delete(h.rooms, room)
+			delete(hub.rooms, room)
 		}
 	}
-	h.mu.Unlock()
+	hub.mu.Unlock()
 
-	for _, c := range stale {
-		c.Close()
+	for _, client := range stale {
+		client.Close()
 	}
 }
 
-func (h *Hub) usernamesLocked(room string) []string {
-	members := h.rooms[room]
+func (hub *Hub) usernamesLocked(room string) []string {
+	members := hub.rooms[room]
 	users := make([]string, 0, len(members))
-	for c := range members {
-		users = append(users, c.Username())
+	for client := range members {
+		users = append(users, client.Username())
 	}
 	return users
 }

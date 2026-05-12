@@ -39,25 +39,25 @@ func Load() *Config {
 }
 
 func getString(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+	if value := os.Getenv(key); value != "" {
+		return value
 	}
 	return fallback
 }
 
 func getInt(key string, fallback int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			return parsed
 		}
 	}
 	return fallback
 }
 
 func getDuration(key string, fallback time.Duration) time.Duration {
-	if v := os.Getenv(key); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			return d
+	if value := os.Getenv(key); value != "" {
+		if duration, err := time.ParseDuration(value); err == nil {
+			return duration
 		}
 	}
 	return fallback
@@ -65,11 +65,11 @@ func getDuration(key string, fallback time.Duration) time.Duration {
 
 func parseCSV(raw string) []string {
 	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if trimmed := strings.TrimSpace(p); trimmed != "" {
-			out = append(out, trimmed)
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			result = append(result, trimmed)
 		}
 	}
-	return out
+	return result
 }
