@@ -1,0 +1,18 @@
+1 Descomprimir y entrar al proyecto
+cd chat-app
+
+
+2 Descargar dependencias
+go mod tidy
+
+
+3 Levantar el servidor
+go run cmd/main.go
+
+
+4 bash
+# Mac
+open http://localhost:8080
+
+5 # Windows
+start http://localhost:8080
