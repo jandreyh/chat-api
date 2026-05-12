@@ -1,4 +1,4 @@
-module chat-app
+module github.com/jandreyh/chat-api
 
 go 1.21
 

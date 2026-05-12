@@ -2,114 +2,162 @@ package hub
 
 import (
 	"log"
+	"sync"
 
-	"chat-app/internal/models"
+	"github.com/jandreyh/chat-api/internal/models"
 )
 
-// Hub es el corazón del chat: gestiona clientes y distribuye mensajes
-// Todo pasa por canales — esto es Go concurrente en acción
-type Hub struct {
-	// Clientes activos agrupados por sala: map[sala]map[cliente]bool
-	Rooms map[string]map[*Client]bool
-
-	// Canales de comunicación (la magia de Go)
-	Register   chan *Client        // cliente nuevo se conecta
-	Unregister chan *Client        // cliente se desconecta
-	Broadcast  chan models.Message // mensaje para distribuir
+// Client es la interfaz que cualquier transporte debe cumplir para
+// formar parte del hub. Desacopla al hub del WebSocket (Dependency Inversion).
+type Client interface {
+	Username() string
+	Room() string
+	Deliver(msg models.Message) bool
+	Close()
 }
 
-// NewHub crea e inicializa el hub
-func NewHub() *Hub {
+// Hub coordina las salas y la distribución de mensajes.
+// Aplica el patrón actor: las mutaciones se serializan en Run().
+// Las consultas externas usan un RWMutex para evitar data races.
+type Hub struct {
+	mu    sync.RWMutex
+	rooms map[string]map[Client]struct{}
+
+	registerCh   chan Client
+	unregisterCh chan Client
+	broadcastCh  chan models.Message
+}
+
+// New construye un hub con buffers configurables.
+func New(broadcastBuffer int) *Hub {
 	return &Hub{
-		Rooms:      make(map[string]map[*Client]bool),
-		Register:   make(chan *Client),
-		Unregister: make(chan *Client),
-		Broadcast:  make(chan models.Message, 256),
+		rooms:        make(map[string]map[Client]struct{}),
+		registerCh:   make(chan Client),
+		unregisterCh: make(chan Client),
+		broadcastCh:  make(chan models.Message, broadcastBuffer),
 	}
 }
 
-// Run es el loop principal del hub — corre en una goroutine dedicada
-// Procesa eventos de forma secuencial y segura (sin mutex necesario)
+// Run ejecuta el loop principal del hub. Debe correr en su propia goroutine.
 func (h *Hub) Run() {
 	for {
 		select {
-
-		// ── Nuevo cliente ────────────────────────────────────────────
-		case client := <-h.Register:
-			// Crear la sala si no existe
-			if _, ok := h.Rooms[client.Room]; !ok {
-				h.Rooms[client.Room] = make(map[*Client]bool)
-			}
-			h.Rooms[client.Room][client] = true
-
-			log.Printf("✅ [%s] %s se conectó (%d en sala)",
-				client.Room, client.Username, len(h.Rooms[client.Room]))
-
-			// Notificar a todos que alguien llegó
-			h.broadcastToRoom(client.Room, models.Message{
-				Type:     models.TypeJoin,
-				Username: client.Username,
-				Content:  client.Username + " se unió al chat 👋",
-				Room:     client.Room,
-				Users:    h.usersInRoom(client.Room),
-			})
-
-		// ── Cliente se desconecta ─────────────────────────────────────
-		case client := <-h.Unregister:
-			if room, ok := h.Rooms[client.Room]; ok {
-				if _, ok := room[client]; ok {
-					delete(room, client)
-					close(client.Send)
-
-					log.Printf("❌ [%s] %s se desconectó (%d en sala)",
-						client.Room, client.Username, len(h.Rooms[client.Room]))
-
-					// Notificar a todos que alguien salió
-					if len(room) > 0 {
-						h.broadcastToRoom(client.Room, models.Message{
-							Type:     models.TypeLeave,
-							Username: client.Username,
-							Content:  client.Username + " salió del chat",
-							Room:     client.Room,
-							Users:    h.usersInRoom(client.Room),
-						})
-					}
-					// Limpiar sala vacía
-					if len(room) == 0 {
-						delete(h.Rooms, client.Room)
-					}
-				}
-			}
-
-		// ── Mensaje para distribuir ───────────────────────────────────
-		case msg := <-h.Broadcast:
-			h.broadcastToRoom(msg.Room, msg)
+		case c := <-h.registerCh:
+			h.onRegister(c)
+		case c := <-h.unregisterCh:
+			h.onUnregister(c)
+		case msg := <-h.broadcastCh:
+			h.fanout(msg.Room, msg)
 		}
 	}
 }
 
-// broadcastToRoom envía un mensaje a todos los clientes de una sala
-func (h *Hub) broadcastToRoom(room string, msg models.Message) {
-	clients, ok := h.Rooms[room]
+func (h *Hub) onRegister(c Client) {
+	room := c.Room()
+
+	h.mu.Lock()
+	if _, ok := h.rooms[room]; !ok {
+		h.rooms[room] = make(map[Client]struct{})
+	}
+	h.rooms[room][c] = struct{}{}
+	occupants := len(h.rooms[room])
+	users := h.usernamesLocked(room)
+	h.mu.Unlock()
+
+	log.Printf("[%s] %s se conectó (%d en sala)", room, c.Username(), occupants)
+	h.fanout(room, models.Message{
+		Type:     models.TypeJoin,
+		Username: c.Username(),
+		Content:  c.Username() + " se unió al chat 👋",
+		Room:     room,
+		Users:    users,
+	})
+}
+
+func (h *Hub) onUnregister(c Client) {
+	room := c.Room()
+
+	h.mu.Lock()
+	clients, ok := h.rooms[room]
 	if !ok {
+		h.mu.Unlock()
 		return
 	}
-	for client := range clients {
-		select {
-		case client.Send <- msg:
-		default:
-			// Si el canal está lleno, desconectar al cliente
-			close(client.Send)
-			delete(clients, client)
-		}
+	if _, ok := clients[c]; !ok {
+		h.mu.Unlock()
+		return
+	}
+	delete(clients, c)
+	remaining := len(clients)
+	var users []string
+	if remaining == 0 {
+		delete(h.rooms, room)
+	} else {
+		users = h.usernamesLocked(room)
+	}
+	h.mu.Unlock()
+
+	c.Close()
+	log.Printf("[%s] %s se desconectó (%d en sala)", room, c.Username(), remaining)
+
+	if remaining > 0 {
+		h.fanout(room, models.Message{
+			Type:     models.TypeLeave,
+			Username: c.Username(),
+			Content:  c.Username() + " salió del chat",
+			Room:     room,
+			Users:    users,
+		})
 	}
 }
 
-// usersInRoom retorna los nombres de todos en una sala
-func (h *Hub) usersInRoom(room string) []string {
-	var users []string
-	for client := range h.Rooms[room] {
-		users = append(users, client.Username)
+// fanout entrega un mensaje a todos los clientes de una sala.
+// Toma un snapshot bajo lock corto, entrega fuera del lock para evitar
+// que un cliente lento bloquee a los demás.
+func (h *Hub) fanout(room string, msg models.Message) {
+	h.mu.RLock()
+	members, ok := h.rooms[room]
+	if !ok {
+		h.mu.RUnlock()
+		return
+	}
+	snapshot := make([]Client, 0, len(members))
+	for c := range members {
+		snapshot = append(snapshot, c)
+	}
+	h.mu.RUnlock()
+
+	var stale []Client
+	for _, c := range snapshot {
+		if !c.Deliver(msg) {
+			stale = append(stale, c)
+		}
+	}
+	if len(stale) == 0 {
+		return
+	}
+
+	h.mu.Lock()
+	if members, ok := h.rooms[room]; ok {
+		for _, c := range stale {
+			delete(members, c)
+		}
+		if len(members) == 0 {
+			delete(h.rooms, room)
+		}
+	}
+	h.mu.Unlock()
+
+	for _, c := range stale {
+		c.Close()
+	}
+}
+
+func (h *Hub) usernamesLocked(room string) []string {
+	members := h.rooms[room]
+	users := make([]string, 0, len(members))
+	for c := range members {
+		users = append(users, c.Username())
 	}
 	return users
 }
